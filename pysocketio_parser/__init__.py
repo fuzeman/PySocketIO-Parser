@@ -1,3 +1,12 @@
+from pysocketio_parser.util import try_convert
+
+from pyemitter import Emitter
+import json
+import logging
+
+log = logging.getLogger(__name__)
+
+
 # Protocol version
 PROTOCOL = 3
 
@@ -35,7 +44,8 @@ class Encoder(object):
         """A socket.io Encoder instance"""
         pass
 
-    def encode(self, obj, callback):
+    @classmethod
+    def encode(cls, obj, callback):
         """Encode a packet as a single string if non-binary, or as a
            buffer sequence, depending on packet type.
 
@@ -47,9 +57,18 @@ class Encoder(object):
 
         :return: Calls callback with list of encodings
         """
-        pass
+        log.debug('encoding packet %s', obj)
 
-    def string_encode(self, obj):
+        p_type = obj['type']
+
+        if p_type in [BINARY_EVENT, ACK]:
+            cls.binary_encode(obj, callback)
+        else:
+            encoding = cls.string_encode(obj)
+            callback([encoding])
+
+    @staticmethod
+    def string_encode(obj):
         """Encode packet as string.
 
         :param obj: packet
@@ -58,9 +77,43 @@ class Encoder(object):
         :return: encoded packet
         :rtype: str
         """
-        pass
+        result = ''
+        nsp = False
 
-    def binary_encode(self, obj, callback):
+        # first is type
+        result += str(obj['type'])
+
+        # attachments if we have them
+        if obj['type'] in [BINARY_EVENT, ACK]:
+            result += obj.get('attachments', '')
+            result += '-'
+
+        # if we have a namespace other than `/`
+        # we append it followed by a comma `,`
+        if obj.get('nsp') and obj['nsp'] != '/':
+            nsp = True
+            result += obj['nsp']
+
+        # immediately followed by the id
+        if obj.get('id'):
+            if nsp:
+                result += ','
+                nsp = False
+
+            result += str(obj['id'])
+
+        # json data
+        if obj.get('data'):
+            if nsp:
+                result += ','
+
+            result += json.dumps(obj['data'])
+
+        log.debug('encoded %s as %s', obj, result)
+        return result
+
+    @staticmethod
+    def binary_encode(obj, callback):
         """Encode packet as 'buffer sequence' by removing blobs, and
            deconstructing packet into object with placeholders and
            a list of buffers.
@@ -74,7 +127,7 @@ class Encoder(object):
         pass
 
 
-class Decoder(object):
+class Decoder(Emitter):
     def __init__(self):
         """A socket.io Decoder instance"""
         pass
@@ -88,7 +141,18 @@ class Decoder(object):
         :return packet
         :rtype: dict
         """
-        pass
+        packet = None
+
+        if isinstance(obj, basestring):
+            packet = string_decode(obj)
+            log.debug('string_decode packet: %s', packet)
+
+            if packet['type'] in [BINARY_EVENT, ACK]:
+                raise NotImplementedError()
+            else:
+                self.emit('decoded', packet)
+        else:
+            raise NotImplementedError()
 
     def destroy(self):
         """Deallocates a parser's resources"""
@@ -104,7 +168,69 @@ def string_decode(string):
     :return: packet
     :rtype: dict
     """
-    pass
+    p = {}
+    i = 0
+
+    # look up type
+    p['type'] = try_convert(string[0], int)
+
+    if p['type'] is None or p['type'] >= len(TYPES):
+        return error()
+
+    # look up attachments if type binary
+    if p['type'] in [BINARY_EVENT, ACK]:
+        p['attachments'] = ''
+
+        while string[i] != '-':
+            i += 1
+            p['attachments'] += string[i]
+
+        p['attachments'] = try_convert(p['attachments'], int)
+
+    # look up namespace (if any)
+    if string[i + 1] == '/':
+        p['nsp'] = ''
+
+        while i + 1 < len(string):
+            i += 1
+
+            c = string[i]
+
+            if c == ',':
+                break
+
+            p['nsp'] += c
+    else:
+        p['nsp'] = '/'
+
+    # look up id
+    next = string[i + 1] if i + 1 < len(string) else None
+
+    if next and try_convert(next, int):
+        p['id'] = ''
+
+        while i + 1 < len(string):
+            i += 1
+
+            c = string[i]
+
+            if not c or not try_convert(c, int):
+                i -= 1
+                break
+
+            p['id'] += string[i]
+
+        p['id'] = try_convert(p['id'], int)
+
+    # look up json data
+    if string[i + 1:]:
+        try:
+            p['data'] = json.loads(string[i + 1:])
+        except:
+            return error()
+
+    log.debug('decoded %s as %s', string, p)
+    return p
 
 
 class BinaryReconstructor(object):
@@ -137,8 +263,8 @@ class BinaryReconstructor(object):
         pass
 
 
-def error(data):
+def error(data=None):
     return {
         'type': ERROR,
-        'data': 'parser error'
+        'data': data or 'parser error'
     }
