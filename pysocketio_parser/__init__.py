@@ -218,7 +218,7 @@ def string_decode(string):
         p['attachments'] = try_convert(p['attachments'], int)
 
     # look up namespace (if any)
-    if string[i] == '/':
+    if i < len(string) and string[i] == '/':
         p['nsp'] = ''
 
         while i < len(string):
