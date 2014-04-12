@@ -1,3 +1,4 @@
+from pysocketio_parser.binary import deconstruct_packet, reconstruct_packet
 from pysocketio_parser.util import try_convert
 
 from pyemitter import Emitter
@@ -59,6 +60,7 @@ class Encoder(object):
         """
         log.debug('encoding packet %s', obj)
 
+        obj = obj.copy()
         p_type = obj['type']
 
         if p_type in [BINARY_EVENT, ACK]:
@@ -85,7 +87,7 @@ class Encoder(object):
 
         # attachments if we have them
         if obj['type'] in [BINARY_EVENT, ACK]:
-            result += obj.get('attachments', '')
+            result += str(obj.get('attachments', ''))
             result += '-'
 
         # if we have a namespace other than `/`
@@ -112,8 +114,8 @@ class Encoder(object):
         log.debug('encoded %s as %s', obj, result)
         return result
 
-    @staticmethod
-    def binary_encode(obj, callback):
+    @classmethod
+    def binary_encode(cls, obj, callback):
         """Encode packet as 'buffer sequence' by removing blobs, and
            deconstructing packet into object with placeholders and
            a list of buffers.
@@ -124,13 +126,19 @@ class Encoder(object):
         :return: encoded
         :rtype: bytearray
         """
-        pass
+        deconstruction = deconstruct_packet(obj)
+
+        pack = cls.string_encode(deconstruction['packet'])
+        buffers = deconstruction['buffers']
+
+        buffers.insert(0, pack)
+        callback(buffers)
 
 
 class Decoder(Emitter):
     def __init__(self):
         """A socket.io Decoder instance"""
-        pass
+        self.reconstructor = None
 
     def add(self, obj):
         """Decodes an ecoded packet string into packet JSON.
@@ -148,11 +156,27 @@ class Decoder(Emitter):
             log.debug('string_decode packet: %s', packet)
 
             if packet['type'] in [BINARY_EVENT, ACK]:
-                raise NotImplementedError()
+                self.reconstructor = BinaryReconstructor(packet)
+
+                log.debug("decoder binary packet: %s", repr(packet))
+
+                # no attachments, labeled binary but no binary data to follow
+                if not packet['attachments']:
+                    del packet['attachments']
+                    self.emit('decoded', packet)
             else:
                 self.emit('decoded', packet)
+        elif type(obj) is bytearray:
+            if not self.reconstructor:
+                raise Exception("got binary data when not reconstructing packet")
+
+            packet = self.reconstructor.take_binary_data(obj)
+
+            if packet:
+                self.reconstructor = None
+                self.emit('decoded', packet)
         else:
-            raise NotImplementedError()
+            raise Exception('Unknown type: %s' % obj)
 
     def destroy(self):
         """Deallocates a parser's resources"""
@@ -173,6 +197,7 @@ def string_decode(string):
 
     # look up type
     p['type'] = try_convert(string[0], int)
+    i += 1
 
     if p['type'] is None or p['type'] >= len(TYPES):
         return error()
@@ -181,20 +206,24 @@ def string_decode(string):
     if p['type'] in [BINARY_EVENT, ACK]:
         p['attachments'] = ''
 
-        while string[i] != '-':
+        while i < len(string):
+            c = string[i]
             i += 1
-            p['attachments'] += string[i]
+
+            if c == '-':
+                break
+
+            p['attachments'] += c
 
         p['attachments'] = try_convert(p['attachments'], int)
 
     # look up namespace (if any)
-    if string[i + 1] == '/':
+    if string[i] == '/':
         p['nsp'] = ''
 
-        while i + 1 < len(string):
-            i += 1
-
+        while i < len(string):
             c = string[i]
+            i += 1
 
             if c == ',':
                 break
@@ -204,28 +233,27 @@ def string_decode(string):
         p['nsp'] = '/'
 
     # look up id
-    next = string[i + 1] if i + 1 < len(string) else None
+    next = string[i] if i < len(string) else None
 
     if next and try_convert(next, int):
         p['id'] = ''
 
         while i + 1 < len(string):
-            i += 1
-
             c = string[i]
+            i += 1
 
             if not c or not try_convert(c, int):
                 i -= 1
                 break
 
-            p['id'] += string[i]
+            p['id'] += c
 
         p['id'] = try_convert(p['id'], int)
 
     # look up json data
-    if string[i + 1:]:
+    if string[i:]:
         try:
-            p['data'] = json.loads(string[i + 1:])
+            p['data'] = json.loads(string[i:])
         except:
             return error()
 
@@ -242,7 +270,8 @@ class BinaryReconstructor(object):
         :param packet: packet
         :type packet: dict
         """
-        pass
+        self.recon_pack = packet
+        self.buffers = []
 
     def take_binary_data(self, bin_data):
         """Method to be called when binary data received from connection
@@ -256,11 +285,18 @@ class BinaryReconstructor(object):
                  been received
         :rtype: None or dict
         """
-        pass
+        self.buffers.append(bin_data)
+
+        if len(self.buffers) == self.recon_pack.get('attachments'):
+            packet = reconstruct_packet(self.recon_pack, self.buffers)
+
+            self.finished_reconstruction()
+            return packet
 
     def finished_reconstruction(self):
         """Cleans up binary packet reconstruction variables."""
-        pass
+        self.recon_pack = None
+        self.buffers = []
 
 
 def error(data=None):
