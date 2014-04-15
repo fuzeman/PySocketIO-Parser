@@ -1,1 +1,2 @@
 *.pyc
+/PySocketIO_Parser.egg-info
