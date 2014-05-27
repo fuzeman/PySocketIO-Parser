@@ -38,7 +38,7 @@ def reconstruct_packet(packet, buffers):
     def reconstruct(data):
         log.debug("reconstruct data: %s", repr(data))
 
-        if data.get('_placeholder'):
+        if data and data.get('_placeholder'):
             buf = buffers[data['num']]
             return buf
         elif type(data) is list:
