@@ -1,8 +1,8 @@
 from pysocketio_parser.binary import deconstruct_packet, reconstruct_packet
 from pysocketio_parser.util import try_convert
+from pysocketio_parser import json_serializer as json
 
 from pyemitter import Emitter
-import json
 import logging
 
 log = logging.getLogger(__name__)
