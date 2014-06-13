@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 
 # Protocol version
-PROTOCOL = 3
+PROTOCOL = 4
 
 # Packet types.
 TYPES = [
