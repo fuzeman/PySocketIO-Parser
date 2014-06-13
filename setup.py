@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='PySocketIO-Parser',
-    version='2.1.5-beta',
+    version='2.2.0-beta',
     url='http://github.com/fuzeman/PySocketIO-Parser/',
 
     author='Dean Gardiner',

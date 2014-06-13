@@ -18,6 +18,7 @@ TYPES = [
     'EVENT',
     'BINARY_EVENT',
     'ACK',
+    'BINARY_ACK',
     'ERROR'
 ]
 
@@ -38,6 +39,9 @@ ERROR = 4
 
 # Packet type `binary event`
 BINARY_EVENT = 5
+
+# Packet type `binary ack`. For acks with binary arguments
+BINARY_ACK = 6
 
 
 class Encoder(object):
@@ -63,7 +67,7 @@ class Encoder(object):
         obj = obj.copy()
         p_type = obj['type']
 
-        if p_type in [BINARY_EVENT, ACK]:
+        if p_type in [BINARY_EVENT, BINARY_ACK]:
             cls.binary_encode(obj, callback)
         else:
             encoding = cls.string_encode(obj)
@@ -86,7 +90,7 @@ class Encoder(object):
         result += str(obj['type'])
 
         # attachments if we have them
-        if obj['type'] in [BINARY_EVENT, ACK]:
+        if obj['type'] in [BINARY_EVENT, BINARY_ACK]:
             result += str(obj.get('attachments', ''))
             result += '-'
 
@@ -155,7 +159,7 @@ class Decoder(Emitter):
             packet = string_decode(obj)
             log.debug('string_decode packet: %s', packet)
 
-            if packet['type'] in [BINARY_EVENT, ACK]:
+            if packet['type'] in [BINARY_EVENT, BINARY_ACK]:
                 self.reconstructor = BinaryReconstructor(packet)
 
                 log.debug("decoder binary packet: %s", repr(packet))
@@ -203,7 +207,7 @@ def string_decode(string):
         return error()
 
     # look up attachments if type binary
-    if p['type'] in [BINARY_EVENT, ACK]:
+    if p['type'] in [BINARY_EVENT, BINARY_ACK]:
         p['attachments'] = ''
 
         while i < len(string):
